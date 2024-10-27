@@ -1,0 +1,179 @@
+\documentclass[UTF8]{ctexart}
+
+\usepackage{graphics}
+\usepackage{indentfirst}
+\usepackage{enumerate}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{subfigure}
+
+\setlength{\parindent}{2em}
+\newcommand\degree{^\circ}
+
+\title{\heiti 一种基于多路复用器的键盘扫描方案}
+\author{\kaishu 顾顺}
+\date{\today}
+
+
+
+\begin{document}
+	\maketitle
+
+	\newpage
+
+	\tableofcontents
+	
+	\begin{abstract}
+		\textbf{关键词: }键盘扫描方案\space 多路复用器 \space 模拟开关
+	\end{abstract}
+
+	\newpage
+
+	\section{引言}
+	\indent 本文介绍了一种基于CD4067B的键盘扫描方式，具有较高的回报率理论值，\\\\
+	\indent 该键盘扫描方案具有高速、高精度、占用IO口少等优点，\\\\
+	\indent 本文将分别提出两种键盘扫描方案：被动扫描方案和主动扫描方案。\\\\
+	
+	\newpage
+	
+	\section{被动扫描方案}
+	\subsection{方案思路}
+		\indent 采用CD4067B\space 16进1模拟开关，将每16个按键的输出通过轮询集中到一个IO口上，用MCU的GPIO操作模拟开关的地址输入。 \\\\
+		\indent 该方案支持级联，只需将每个4067B的地址输入并联，分别读取输出即可。 \\\\
+	
+	\subsection{原理图}
+		\begin{figure}[htbp]
+			\centering 
+			\includegraphics[width=0.75\textwidth]{im1}
+			\caption{被动扫描方案原理图}
+			% \label{fig:example-image}
+		\end{figure}
+	
+	\subsection{方案优点与缺陷}
+		优点：
+		\begin{enumerate}[\indent(1)\space]
+
+			\item 极高的回报率：4067B的工作频率\cite{ref1}在MHz级别\cite{ref1}，因此回报率的限制就在于MCU的扫描速度，可以轻易达到kHz级。
+
+			\item 较少的IO口：每$16n$个按键的扫描仅需$(n+4)$个IO口。
+
+			\item 低功耗：根据官方datasheet,4067B的功耗(5V输入)典型值为$0.2\mu W$,不超过$25\mu W$\cite{ref1}。
+
+		\end{enumerate}
+		
+		缺点：
+		\begin{enumerate}[\indent(1)\space]
+
+			\item 占用资源较多：4067B的输入信号全部由MCU发生，在采用低算力的MCU(同时处理按键事件，作为HID设备)时会导致资源不够，产生延迟。
+
+		\end{enumerate}
+		
+		
+	\newpage
+	
+	\section{主动扫描方案}
+	\subsection{方案思路}
+		\indent 为解决被动扫描方案的缺陷，该方案在其基础上，加入信号发生器NE555\cite{ref2}(双稳态工作模式)和二进制计数器CD4520B，将其输出作为4067B的地址输入。\\\\
+	
+	\subsection{原理图}
+		\begin{figure}[htbp]
+			\centering 
+			\includegraphics[width=0.75\textwidth]{im2}
+			\caption{被动扫描方案原理图}
+		\end{figure}
+	
+	\newpage
+	
+	\section{被动扫描方案验证}
+		\indent 采用TSSOP封装的CD4067BPWR,占用更小的体积。
+		\begin{figure}[htbp]
+			\centering 
+			\includegraphics[width=0.75\textwidth]{im3}
+		\end{figure}
+		\begin{figure}[htbp]
+			\centering 
+			\includegraphics[width=0.75\textwidth]{im4}
+		\end{figure}
+		
+		\newpage
+		
+		代码实现(Arduino框架下的ESP32)：
+		
+		\begin{lstlisting}
+#include <Arduino.h>
+
+bool p[17],q[17];
+int mapp[17]={3,7,4,8,12,16,15,11,14,13,10,9,6,5,2,1,0};
+
+void setup() {
+  pinMode(12,OUTPUT);
+  pinMode(14,OUTPUT);
+  pinMode(27,OUTPUT);
+  pinMode(26,OUTPUT);
+
+  pinMode(5,OUTPUT);
+  pinMode(4,OUTPUT);
+  pinMode(15,OUTPUT);
+  pinMode(17,OUTPUT);
+
+
+  pinMode(25,INPUT);
+  for(int i=0;i<16;i++) q[i]=0;
+
+  Serial.begin(115200);
+}
+
+bool ctc(int x){
+  return x?HIGH:LOW;
+}
+int cnt;
+void loop() {
+  for(int i=0;i<16;i++){
+    digitalWrite(26,ctc(i&1));
+    digitalWrite(27,ctc(i&2));
+    digitalWrite(14,ctc(i&4));
+    digitalWrite(12,ctc(i&8));
+    p[i]=digitalRead(25);
+  }
+  cnt=0;
+  for(int i=0;i<16;i++){
+    if(p[i]) cnt++;
+    if(p[i]^q[i]){
+      if(p[i]){
+        Serial.print("down: ");
+        Serial.println(mapp[i]);
+      }else{
+        Serial.print("up: ");
+        Serial.println(mapp[i]);
+      }
+    }
+    p[i]^=q[i]^=p[i]^=q[i];
+  }
+  digitalWrite(5,ctc(cnt&1));
+  digitalWrite(4,ctc(cnt&2));
+  digitalWrite(15,ctc(cnt&4));
+  digitalWrite(17,ctc(cnt&8));
+  delay(10);
+}
+
+
+		\end{lstlisting}
+		
+	\newpage
+	
+	\section{应用}
+		\indent 本扫描方案在实际应用中具有极小的功耗和占用体积，适用于超薄便携式键盘等，也可以应用于其他键盘中。
+		
+	\newpage
+	
+	\begin{thebibliography}{99}  
+		CD4067B\space datasheet:\\
+		\indent https://www.ti.com/cn/lit/ds/symlink/cd4067b.pdf\\\\
+		NE555\space datasheet:\\
+		\indent https://www.ti.com/cn/lit/ds/symlink/sa555.pdf
+	
+	\end{thebibliography}
+\end{document}
